@@ -1,5 +1,7 @@
 import itertools
 
+import numpy as np
+
 from edge import GraphEdge
 
 
@@ -12,6 +14,7 @@ class DFG:
         self.end_node = [n for n in self.nodes if n == 'End'][0]
         self.start_node = [n for n in self.nodes if n == 'Start'][0]
         self.edges = self.prepare_edges()
+        self.filtered_edges = None
         self.self_loops, self.self_loops_starts = self.find_self_loops()
         self.short_loops = self.find_short_loops()
         self.remove_self_and_short_loops()
@@ -99,4 +102,43 @@ class DFG:
         print("DFG EDGES AFTER REMOVAL OF CONCURRENT AND INFREQUENT", len(self.edges), self.edges)
 
     def filtering(self, eta):
+        most_frequent_edges = list(filter(None,
+                                          set([self.find_most_frequent_edge(self.find_incoming_edges(task, self.edges))
+                                               for task in self.nodes] + [self.find_most_frequent_edge(
+                                              self.find_outgoing_edges(task, self.edges)) for task in self.nodes])))
+        print("DFG MOST FREQUENT EDGES", len(most_frequent_edges), most_frequent_edges)
+        filtering_threshold = self.get_percentile_frequency(most_frequent_edges, eta)
+        print("DFG FILTERING THRESHOLD", filtering_threshold)
+        most_frequent_edges += [edge for edge in self.edges if edge.count > filtering_threshold]
+        most_frequent_edges = list(set(most_frequent_edges))
+        print("DFG MOST FREQUENT EDGES WITH EDGES ABOVE THRESHOLD", len(most_frequent_edges), most_frequent_edges)
+        filtered_edges = []
+        while len(most_frequent_edges) > 0:
+            most_frequent_edge_current = self.find_most_frequent_edge(most_frequent_edges)
+            if most_frequent_edge_current.count > filtering_threshold or len(
+                    self.find_outgoing_edges(most_frequent_edge_current.start, self.edges)) == 0 or len(
+                self.find_incoming_edges(most_frequent_edge_current.end, self.edges)) == 0:
+                filtered_edges.append(most_frequent_edge_current)
+            most_frequent_edges.remove(most_frequent_edge_current)
+        print("DFG FILTERED EDGES", len(filtered_edges), filtered_edges)
+        self.filtered_edges = filtered_edges
+        return self
+
+    def discover_splits(self):
         pass
+
+    @staticmethod
+    def find_incoming_edges(node, edges):
+        return [edge for edge in edges if edge.end == node]
+
+    @staticmethod
+    def find_outgoing_edges(node, edges):
+        return [edge for edge in edges if edge.start == node]
+
+    @staticmethod
+    def find_most_frequent_edge(edges):
+        return max(edges, key=lambda x: x.count) if len(edges) > 0 else None
+
+    @staticmethod
+    def get_percentile_frequency(edges, eta):
+        return np.percentile(np.array([edge.count for edge in edges]), eta)
