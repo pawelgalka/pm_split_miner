@@ -1,6 +1,6 @@
 import itertools
 
-from edge import DFGEdge
+from edge import GraphEdge
 
 
 class DFG:
@@ -39,7 +39,7 @@ class DFG:
         edges = []
         for trace in self.traces:
             for (start, end) in zip(trace[0::], trace[1::]):
-                edge = DFGEdge(start, end)
+                edge = GraphEdge(start, end)
                 if edge not in edges:
                     edge.increase_frequency()
                     edges.append(edge)
@@ -61,8 +61,8 @@ class DFG:
         for trace in self.traces:
             for a, b, c in zip(trace[0::], trace[1::], trace[2::]):
                 if a == c and a != b:
-                    self.edges[self.edges.index(DFGEdge(a, b))].short_loop_count[b] += 1
-                    self.edges[self.edges.index(DFGEdge(b, a))].short_loop_count[a] += 1
+                    self.edges[self.edges.index(GraphEdge(a, b))].short_loop_count[b] += 1
+                    self.edges[self.edges.index(GraphEdge(b, a))].short_loop_count[a] += 1
         for (edge1, edge2) in itertools.product(self.edges, self.edges):
             if edge1.start not in self.self_loops_starts and edge2.start not in self.self_loops_starts and \
                     edge1.short_loop_count[edge2.start] + edge2.short_loop_count[edge1.start] != 0:
