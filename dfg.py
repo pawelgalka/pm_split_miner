@@ -13,8 +13,8 @@ class DFG:
 
     def __init__(self, log):
         self.log = log
-        # self.traces = self.prepare_traces()
-        self.traces = prepare_artificial_traces()
+        self.traces = self.prepare_traces()
+        # self.traces = prepare_artificial_traces()
         self.xor_count = 0
         self.or_count = 0
         self.and_count = 0
