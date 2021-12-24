@@ -2,12 +2,12 @@ from collections import defaultdict
 
 
 class GraphEdge:
-    def __init__(self, start, end):
+    def __init__(self, start, end, count=0):
         self.is_loop = start == end
         self.short_loop_count = defaultdict(lambda: 0)
         self.start = start
         self.end = end
-        self.count = 0
+        self.count = count
 
     def __key(self):
         return self.start, self.end

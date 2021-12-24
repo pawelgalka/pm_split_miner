@@ -1,15 +1,24 @@
 import itertools
+from typing import Set
 
 import numpy as np
 
+from artificial_log import prepare_artificial_traces
+from bpmn import BPMN
 from edge import GraphEdge
+from join_miner import JoinMiner
 
 
 class DFG:
 
     def __init__(self, log):
         self.log = log
-        self.traces = self.prepare_traces()
+        # self.traces = self.prepare_traces()
+        self.traces = prepare_artificial_traces()
+        self.xor_count = 0
+        self.or_count = 0
+        self.and_count = 0
+        self.bpmn = None
         self.nodes = self.prepare_nodes()
         self.end_node = [n for n in self.nodes if n == 'End'][0]
         self.start_node = [n for n in self.nodes if n == 'Start'][0]
@@ -115,7 +124,7 @@ class DFG:
         filtered_edges = []
         while len(most_frequent_edges) > 0:
             most_frequent_edge_current = self.find_most_frequent_edge(most_frequent_edges)
-            if most_frequent_edge_current.count > filtering_threshold or len(
+            if most_frequent_edge_current.count >= filtering_threshold or len(
                     self.find_outgoing_edges(most_frequent_edge_current.start, self.edges)) == 0 or len(
                 self.find_incoming_edges(most_frequent_edge_current.end, self.edges)) == 0:
                 filtered_edges.append(most_frequent_edge_current)
@@ -124,8 +133,144 @@ class DFG:
         self.filtered_edges = filtered_edges
         return self
 
+    def get_successor_tasks(self, node):
+        return [edge.end for edge in self.find_outgoing_edges(node, self.edges)]
+
     def discover_splits(self):
-        pass
+        self.bpmn = BPMN(self.start_node, self.end_node, self.nodes, [], [], [], [])
+        task_done = []
+        split_tasks = [task for task in self.nodes if len(self.find_outgoing_edges(task, self.filtered_edges)) > 1]
+        if len(split_tasks) == 0:
+            self.bpmn.edges = self.filtered_edges
+            print("BPMN AFTER TASK", self.bpmn)
+            return self
+
+        for task in split_tasks:
+            successor_tasks = set(self.get_successor_tasks(task))
+            cover_set = {}
+            future_set = {}
+            print("TASK", task, "SUCCESSORS", successor_tasks)
+            for successor in successor_tasks:
+                cover_set_successor = set()
+                cover_set_successor.add(successor)
+                future_set_successor = set()
+                for successor2 in successor_tasks:
+                    if successor != successor2 and GraphEdge(successor, successor2) in self.concurrent_tasks:
+                        future_set_successor.add(successor2)
+                cover_set[successor] = cover_set_successor
+                future_set[successor] = future_set_successor
+            edges_without_successors = [edge for edge in self.filtered_edges if
+                                        edge not in self.find_outgoing_edges(task,
+                                                                             self.filtered_edges) and edge.start not in split_tasks]
+            print("FUTURE SET", future_set)
+            print("COVER SET", cover_set)
+            print("EDGES WITHOUT SUCCESSORS", len(edges_without_successors), edges_without_successors)
+            self.bpmn.edges = list(set(self.bpmn.edges + edges_without_successors))
+            while len(successor_tasks) > 1:
+                successor_tasks, cover_set, future_set = self.discover_xor_split(successor_tasks, cover_set,
+                                                                                 future_set)
+                successor_tasks, cover_set, future_set = self.discover_and_split(successor_tasks, cover_set, future_set)
+            self.bpmn.edges.append(GraphEdge(task, successor_tasks.pop(), 1))
+            print("BPMN AFTER TASK", task, self.bpmn)
+            task_done.append(task)
+        return self
+
+    def discover_xor_split(self, successor_tasks: Set, cover_set, future_set):
+        flag = True
+        while flag:
+            set_X = set()
+            for successor in successor_tasks:
+                cover_set_u: Set = cover_set[successor]
+                future_set_u = future_set[successor]
+                future_set_k1 = future_set[successor]
+                for successor2 in successor_tasks:
+                    future_set_k2 = future_set[successor2]
+                    if future_set_k1 == future_set_k2 and successor != successor2:
+                        set_X.add(successor2)
+                        cover_set_u = cover_set_u.union(cover_set[successor2])
+                if len(set_X) > 0:
+                    set_X.add(successor)
+                    break
+            if len(set_X) > 0:
+                self.xor_count += 1
+                xor = f"xor{self.xor_count}"
+                print("ADDING XOR")
+                self.bpmn.xor_gateways.append(xor)
+                self.bpmn.edges += [GraphEdge(xor, x, count=1) for x in set_X]
+                for x in set_X:
+                    cover_set[x] = None
+                    future_set[x] = None
+                cover_set[xor] = cover_set_u
+                future_set[xor] = future_set_u
+                successor_tasks.add(xor)
+                successor_tasks.difference_update(set_X)
+            if len(set_X) == 0:
+                flag = False
+        return successor_tasks, cover_set, future_set
+
+    def discover_and_split(self, successor_tasks, cover_set, future_set):
+        set_a = set()
+        for successor in successor_tasks:
+            set_a.clear()
+            cover_set_u: Set = cover_set[successor]
+            future_set_i: Set = future_set[successor]
+            cover_future_set = cover_set_u.union(future_set_i)
+            for successor2 in successor_tasks:
+                cover_future_set2 = cover_set[successor2].union(future_set[successor2])
+                if cover_future_set == cover_future_set2 and successor != successor2:
+                    set_a.add(successor2)
+                    cover_set_u = cover_set_u.union(cover_set[successor2])
+                    future_set_i = future_set_i.intersection(future_set[successor2])
+            if len(set_a) > 0:
+                set_a.add(successor)
+                break
+        if len(set_a) > 0:
+            self.and_count += 1
+            and_g = f"and{self.and_count}"
+            print("ADDING AND")
+            self.bpmn.and_gateways.append(and_g)
+            self.bpmn.edges += [GraphEdge(and_g, x, count=1) for x in set_a]
+            for x in set_a:
+                cover_set[x] = None
+                future_set[x] = None
+            cover_set[and_g] = cover_set_u
+            future_set[and_g] = future_set_i
+            successor_tasks.add(and_g)
+            successor_tasks.difference_update(set_a)
+        return successor_tasks, cover_set, future_set
+
+    def discover_joins(self):
+        if len(self.bpmn.xor_gateways + self.bpmn.and_gateways + self.bpmn.or_gateways) > 0:
+            rpst_solver = JoinMiner()
+            edges = rpst_solver.call(self.bpmn.format())
+            edge_dict = self.prepare_edges_to_bpmn(edges)
+            self.bpmn.edges = [(GraphEdge(edge_dict[start], edge_dict[end], 1)) for (start, end) in edges]
+        print("FINAL BPMN", self.bpmn)
+        return self.bpmn
+
+    def prepare_edges_to_bpmn(self, edges):
+        edges_keys = set([part[0] for part in edges] + [part[1] for part in edges])
+        edge_dict = {}
+        for part in edges_keys:
+            new_part = part
+            if not part[-1].isdigit():
+                if part.startswith('xor'):
+                    if any([part.endswith(i) for i in self.bpmn.T]):
+                        self.xor_count += 1
+                        new_part = 'xor' + str(self.xor_count)
+                    self.bpmn.xor_gateways.append(new_part)
+                if part.startswith('or'):
+                    if any([part.endswith(i) for i in self.bpmn.T]):
+                        self.or_count += 1
+                        new_part = 'or' + str(self.or_count)
+                    self.bpmn.or_gateways.append(new_part)
+                if part.startswith('and'):
+                    if any([part.endswith(i) for i in self.bpmn.T]):
+                        self.and_count += 1
+                        new_part = 'and' + str(self.and_count)
+                    self.bpmn.and_gateways.append(new_part)
+            edge_dict[part] = new_part
+        return edge_dict
 
     @staticmethod
     def find_incoming_edges(node, edges):
