@@ -6,7 +6,7 @@ Project created for PM class in AGH UST
 
 ### Run:
 
-- Compile Java Joiner (if not present under `/java-joiner/target/JoinMiner.jar`: `mvn clean install`
+- Compile Java Joiner (if not present under `/java-joiner/target/JoinMiner.jar`): `mvn clean install`
   
   *Note*: requires JDK 11 to run
 - Run Python script : `python3 main.py`
