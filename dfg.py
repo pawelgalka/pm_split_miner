@@ -13,8 +13,8 @@ class DFG:
 
     def __init__(self, log):
         self.log = log
-        self.traces = self.prepare_traces()
-        # self.traces = prepare_artificial_traces()
+        # self.traces = self.prepare_traces()
+        self.traces = prepare_artificial_traces()
         self.xor_count = 0
         self.or_count = 0
         self.and_count = 0
@@ -195,18 +195,21 @@ class DFG:
                 self.xor_count += 1
                 xor = f"xor{self.xor_count}"
                 print("ADDING XOR")
-                self.bpmn.xor_gateways.append(xor)
-                self.bpmn.edges += [GraphEdge(xor, x, count=1) for x in set_X]
-                for x in set_X:
-                    cover_set[x] = None
-                    future_set[x] = None
-                cover_set[xor] = cover_set_u
-                future_set[xor] = future_set_u
-                successor_tasks.add(xor)
-                successor_tasks.difference_update(set_X)
+                self.add_gateway_to_bpmn(cover_set, cover_set_u, future_set, future_set_u, xor, set_X, successor_tasks)
             if len(set_X) == 0:
                 flag = False
         return successor_tasks, cover_set, future_set
+
+    def add_gateway_to_bpmn(self, cover_set, cover_set_u, future_set, future_set_u, gate, set_X, successor_tasks):
+        self.bpmn.xor_gateways.append(gate)
+        self.bpmn.edges += [GraphEdge(gate, x, count=1) for x in set_X]
+        for x in set_X:
+            cover_set[x] = None
+            future_set[x] = None
+        cover_set[gate] = cover_set_u
+        future_set[gate] = future_set_u
+        successor_tasks.add(gate)
+        successor_tasks.difference_update(set_X)
 
     def discover_and_split(self, successor_tasks, cover_set, future_set):
         set_a = set()
@@ -228,15 +231,7 @@ class DFG:
             self.and_count += 1
             and_g = f"and{self.and_count}"
             print("ADDING AND")
-            self.bpmn.and_gateways.append(and_g)
-            self.bpmn.edges += [GraphEdge(and_g, x, count=1) for x in set_a]
-            for x in set_a:
-                cover_set[x] = None
-                future_set[x] = None
-            cover_set[and_g] = cover_set_u
-            future_set[and_g] = future_set_i
-            successor_tasks.add(and_g)
-            successor_tasks.difference_update(set_a)
+            self.add_gateway_to_bpmn(cover_set, cover_set_u, future_set, future_set_i, and_g, set_a, successor_tasks)
         return successor_tasks, cover_set, future_set
 
     def discover_joins(self):

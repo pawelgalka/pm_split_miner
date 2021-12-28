@@ -7,7 +7,7 @@ class JoinMiner:
         return self._format_stdout(self._call_java(dfg))
 
     def _call_java(self, argument: str):
-        p = Popen(['java', '-jar', './data/JoinMiner.jar', str(argument), "0"],
+        p = Popen(['java', '-jar', './java-joiner/target/JoinMiner.jar', str(argument), "0"],
                   stdout=PIPE, stderr=STDOUT)
         return [item.decode('utf-8').rstrip() for item in p.stdout]
 
