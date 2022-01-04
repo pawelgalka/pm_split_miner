@@ -1,6 +1,5 @@
 package pl.edu.agh;
 
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -18,8 +17,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.jbpt.algo.tree.rpst.IRPSTNode;
 import org.jbpt.algo.tree.rpst.RPST;
-import org.jbpt.algo.tree.rpst.RPSTNode;
 import org.jbpt.graph.DirectedEdge;
 import org.jbpt.graph.MultiDirectedGraph;
 import org.jbpt.hypergraph.abs.IVertex;
@@ -27,7 +26,7 @@ import org.jbpt.hypergraph.abs.Vertex;
 
 public class JoinMiner {
     private final Graph graph;
-    private final RPST rpst;
+    private final RPST<DirectedEdge, Vertex> rpst;
 
     public JoinMiner(RPST<DirectedEdge, Vertex> rpst, Graph graph) {
         this.rpst = rpst;
@@ -35,31 +34,30 @@ public class JoinMiner {
     }
 
     public void discoverJoins() {
-        Queue<IVertex> bottomUpRpstNodeQueue = this.buildBottomUpQueue();
+        Queue<IRPSTNode<DirectedEdge, Vertex>> bottomUpRpstNodeQueue = this.buildBottomUpQueue();
 
         while (!bottomUpRpstNodeQueue.isEmpty()) {
-            RPSTNode rpstNode = (RPSTNode) bottomUpRpstNodeQueue.poll();
-            DirectedEdge[] edgesComposingRpstNode = (DirectedEdge[]) rpstNode.getFragment()
-                    .toArray(new DirectedEdge[0]);
-            Set<BpmnVertex> bpmnNodesComposingRpstNode = this.getBpmnNodesFromRpstNode(rpstNode);
+            IRPSTNode<DirectedEdge, Vertex> firstNode = bottomUpRpstNodeQueue.poll();
+            Set<BpmnVertex> setOfTasksComposingFirstNode = this.getBpmnNodesFromRpstNode(firstNode);
+            Set<DirectedEdge> setOfEdgesComposingFirstNode = new HashSet<>(firstNode.getFragment());
 
-            for (BpmnVertex bpmnNodeFromRpst : bpmnNodesComposingRpstNode) {
-                List<DirectedEdge> commonEdgestoGiveNode = this.getCommonEdgestoGiveNode(edgesComposingRpstNode,
-                        bpmnNodeFromRpst);
-                if (commonEdgestoGiveNode.stream().count() > 1L && !bpmnNodeFromRpst.isGate()) {
-                    String joinGateName = "join_" + bpmnNodeFromRpst.getName();
+            for (BpmnVertex task : setOfTasksComposingFirstNode) {
+                List<DirectedEdge> commonEdgesToGivenNode = this.getCommonEdgesToGivenNode(setOfEdgesComposingFirstNode,
+                        task);
+                if (commonEdgesToGivenNode.size() > 1 && !task.isGate()) {
+                    String joinGateName = "join_" + task.getName();
                     BpmnVertex joinGate = new BpmnVertex(joinGateName, true, BpmnNodeType.UNDEFINED);
-                    this.addJoinGateToBpmnGraph(commonEdgestoGiveNode, bpmnNodeFromRpst, joinGate);
+                    this.addJoinGateToBpmnGraph(commonEdgesToGivenNode, task, joinGate);
                     if (this.checkIfContainsBackEdge(joinGate)) {
                         joinGate.setNodeType(BpmnNodeType.XORJOIN);
                         joinGate.setName("XORJOIN_" + joinGateName);
                     } else {
-                        Function<BpmnNodeType, BpmnNodeType> generalKinfOfGateConverter = this::convertGateToGeneralKind;
-                        if (this.checkIfHomogenous(rpstNode, generalKinfOfGateConverter)) {
-                            BpmnNodeType nodeType = this.getHomogenousNodeType(rpstNode, generalKinfOfGateConverter);
+                        Function<BpmnNodeType, BpmnNodeType> convertGateToGeneralKind = this::convertGateToGeneralKind;
+                        if (this.checkIfHomogenous(firstNode, convertGateToGeneralKind)) {
+                            BpmnNodeType nodeType = this.getHomogenousNodeType(firstNode, convertGateToGeneralKind);
                             joinGate.setNodeType(nodeType);
-                            String var10001 = nodeType.toString();
-                            joinGate.setName(var10001 + "_" + joinGateName);
+                            String nodeName = nodeType.toString();
+                            joinGate.setName(nodeName + "_" + joinGateName);
                         } else {
                             joinGate.setNodeType(BpmnNodeType.ORJOIN);
                             joinGate.setName("ORJOIN_" + joinGateName);
@@ -82,26 +80,26 @@ public class JoinMiner {
         }
     }
 
-    private BpmnNodeType getHomogenousNodeType(RPSTNode rpstNode,
+    private BpmnNodeType getHomogenousNodeType(IRPSTNode<DirectedEdge, Vertex> rpstNode,
             Function<BpmnNodeType, BpmnNodeType> generalKindOfGateConverter) {
-        return this.getgatesTypes(this.getBpmnNodesFromRpstNode(rpstNode))
+        return this.getGatesTypes(this.getBpmnNodesFromRpstNode(rpstNode))
                 .map(generalKindOfGateConverter).findAny().orElseThrow(RuntimeException::new);
     }
 
-    private boolean checkIfHomogenous(RPSTNode rpstNode,
+    private boolean checkIfHomogenous(IRPSTNode<DirectedEdge, Vertex> rpstNode,
             Function<BpmnNodeType, BpmnNodeType> generalKindOfGateConverter) {
         Set<BpmnVertex> bpmnNodes = this.getBpmnNodesFromRpstNode(rpstNode);
-        long distinctGateTypeCounter = this.getgatesTypes(bpmnNodes).map(generalKindOfGateConverter).distinct().count();
-        return distinctGateTypeCounter == 1L;
+        long distinctGateTypeCounter = this.getGatesTypes(bpmnNodes).map(generalKindOfGateConverter).distinct().count();
+        return distinctGateTypeCounter == 1;
     }
 
-    private Stream<BpmnNodeType> getgatesTypes(Set<BpmnVertex> bpmnNodes) {
+    private Stream<BpmnNodeType> getGatesTypes(Set<BpmnVertex> bpmnNodes) {
         return bpmnNodes.stream().filter(BpmnVertex::isGate).map(BpmnVertex::getNodeType)
                 .filter((nodeType) -> !nodeType.equals(BpmnNodeType.UNDEFINED));
     }
 
-    private List<DirectedEdge> getCommonEdgestoGiveNode(DirectedEdge[] edgesComposingRpstNodes, BpmnVertex node) {
-        List<DirectedEdge> EdgesFromRpstGraphToGivenNode = Arrays.stream(edgesComposingRpstNodes)
+    private List<DirectedEdge> getCommonEdgesToGivenNode(Set<DirectedEdge> edgesComposingRpstNodes, BpmnVertex node) {
+        List<DirectedEdge> EdgesFromRpstGraphToGivenNode = edgesComposingRpstNodes.stream()
                 .filter((edge) -> edge.getTarget().equals(node)).collect(Collectors.toList());
         return this.graph.getEdges().stream()
                 .filter((directedEdge) -> directedEdge.getTarget().equals(this.getBpmnEquivalentNode(node)))
@@ -119,16 +117,15 @@ public class JoinMiner {
         Collection<DirectedEdge> bpmnEdges = this.graph.getEdges();
         List<DirectedEdge> edgesToGate = bpmnEdges.stream().filter((edge) -> edge.getTarget().equals(joinGate))
                 .collect(Collectors.toList());
-        Iterator var4 = edgesToGate.iterator();
+        Iterator<DirectedEdge> directedEdgeIterator = edgesToGate.iterator();
 
         BpmnVertex source;
         BpmnVertex gate;
         do {
-            if (!var4.hasNext()) {
+            if (!directedEdgeIterator.hasNext()) {
                 return false;
             }
-
-            DirectedEdge edgeToGate = (DirectedEdge) var4.next();
+            DirectedEdge edgeToGate = directedEdgeIterator.next();
             source = (BpmnVertex) edgeToGate.getSource();
             gate = (BpmnVertex) edgeToGate.getTarget();
         } while (!this.isPathBetweenNodes(gate, source) || !this.isNodeTopologicalDeeper(source, gate));
@@ -144,11 +141,9 @@ public class JoinMiner {
     }
 
     private List<Vertex> topologicalSort(MultiDirectedGraph graph) {
-        Map<Vertex, Boolean> visited = new HashMap();
-        graph.getVertices().forEach((vertexx) -> {
-            visited.put(vertexx, false);
-        });
-        Stack<Vertex> sortStack = new Stack();
+        Map<Vertex, Boolean> visited = new HashMap<>();
+        graph.getVertices().forEach((vertexx) -> visited.put(vertexx, false));
+        Stack<Vertex> sortStack = new Stack<>();
 
         for (Vertex vertex : graph.getVertices()) {
             if (!(Boolean) visited.get(vertex)) {
@@ -156,7 +151,7 @@ public class JoinMiner {
             }
         }
 
-        return new LinkedList(sortStack);
+        return new LinkedList<>(sortStack);
     }
 
     private void topologicalSortHelper(Vertex vertex, Map<Vertex, Boolean> visited, Stack<Vertex> sortStack,
@@ -171,13 +166,11 @@ public class JoinMiner {
     }
 
     private boolean isPathBetweenNodes(BpmnVertex source, BpmnVertex target) {
-        Map<IVertex, Boolean> visited = new HashMap();
+        Map<IVertex, Boolean> visited = new HashMap<>();
         MultiDirectedGraph multiDirectedGraph = this.graph;
         Collection<Vertex> vertices = multiDirectedGraph.getVertices();
-        vertices.forEach((vertex) -> {
-            visited.put(vertex, false);
-        });
-        LinkedList<Vertex> queue = new LinkedList();
+        vertices.forEach((vertex) -> visited.put(vertex, false));
+        LinkedList<Vertex> queue = new LinkedList<>();
         visited.put(source, true);
         queue.add(source);
 
@@ -188,7 +181,6 @@ public class JoinMiner {
                 if (neighbour.equals(target)) {
                     return true;
                 }
-
                 visited.put(neighbour, true);
                 queue.add(neighbour);
             }
@@ -202,9 +194,7 @@ public class JoinMiner {
         BpmnVertex bpmnEquivalentNode = this.getBpmnEquivalentNode(node);
         graph.addEdge(joinGate, bpmnEquivalentNode);
         commonEdges.stream().filter((bpmnEdge) -> bpmnEdge.getTarget().equals(bpmnEquivalentNode))
-                .forEach((bpmnEdge) -> {
-                    bpmnEdge.setTarget(joinGate);
-                });
+                .forEach((bpmnEdge) -> bpmnEdge.setTarget(joinGate));
     }
 
     private BpmnVertex getBpmnEquivalentNode(BpmnVertex nodeFromRpst) {
@@ -213,8 +203,8 @@ public class JoinMiner {
                 .orElseThrow(RuntimeException::new);
     }
 
-    private Set<BpmnVertex> getBpmnNodesFromRpstNode(RPSTNode rpstNode) {
-        Set<BpmnVertex> nodes = new HashSet();
+    private Set<BpmnVertex> getBpmnNodesFromRpstNode(IRPSTNode<DirectedEdge, Vertex> rpstNode) {
+        Set<BpmnVertex> nodes = new HashSet<>();
         Object[] rpstNodeFragments = rpstNode.getFragment().toArray();
 
         for (Object edge : rpstNodeFragments) {
@@ -228,22 +218,24 @@ public class JoinMiner {
         return nodes;
     }
 
-    public Queue<IVertex> buildBottomUpQueue() {
-        RPST rpst = this.rpst;
-        Map<IVertex, Integer> depthMap = this.getDepthMap(rpst);
-        Comparator<Entry<IVertex, Integer>> depthComparator = Entry.comparingByValue(Comparator.reverseOrder());
-        List<IVertex> sortedNodesByDepth = depthMap.entrySet().stream().sorted(depthComparator)
+    public Queue<IRPSTNode<DirectedEdge, Vertex>> buildBottomUpQueue() {
+        RPST<DirectedEdge, Vertex> rpst = this.rpst;
+        Map<IRPSTNode<DirectedEdge, Vertex>, Integer> depthMap = this.getDepthMap(rpst);
+        Comparator<Entry<IRPSTNode<DirectedEdge, Vertex>, Integer>> depthComparator = Entry.comparingByValue(
+                Comparator.reverseOrder());
+        List<IRPSTNode<DirectedEdge, Vertex>> sortedNodesByDepth = depthMap.entrySet().stream().sorted(depthComparator)
                 .map(Entry::getKey).collect(Collectors.toList());
 
-        LinkedList bottomUpRpstNodeQueue;
-        IVertex node;
-        for (bottomUpRpstNodeQueue = new LinkedList(); !sortedNodesByDepth.isEmpty(); sortedNodesByDepth.remove(node)) {
+        LinkedList<IRPSTNode<DirectedEdge, Vertex>> bottomUpRpstNodeQueue;
+        IRPSTNode<DirectedEdge, Vertex> node;
+        for (bottomUpRpstNodeQueue = new LinkedList<>(); !sortedNodesByDepth.isEmpty(); sortedNodesByDepth.remove(
+                node)) {
             node = sortedNodesByDepth.get(0);
             bottomUpRpstNodeQueue.add(node);
-            Collection<IVertex> directPredecessors = rpst.getDirectPredecessors(node);
-            Optional<IVertex> predecessor = directPredecessors.stream().findFirst();
+            Collection<IRPSTNode<DirectedEdge, Vertex>> directPredecessors = rpst.getDirectPredecessors(node);
+            Optional<IRPSTNode<DirectedEdge, Vertex>> predecessor = directPredecessors.stream().findFirst();
             if (predecessor.isPresent()) {
-                Collection<IVertex> neighbours = rpst.getDirectSuccessors(predecessor.get());
+                Collection<IRPSTNode<DirectedEdge, Vertex>> neighbours = rpst.getDirectSuccessors(predecessor.get());
                 IVertex finalNode = node;
                 neighbours.stream().filter((neighbour) ->
                                 !neighbour.equals(finalNode) && !bottomUpRpstNodeQueue.contains(neighbour))
@@ -259,10 +251,10 @@ public class JoinMiner {
         return bottomUpRpstNodeQueue;
     }
 
-    private Map<IVertex, Integer> getDepthMap(RPST rpst) {
-        Map<IVertex, Integer> depthMap = new HashMap<>();
+    private Map<IRPSTNode<DirectedEdge, Vertex>, Integer> getDepthMap(RPST<DirectedEdge, Vertex> rpst) {
+        Map<IRPSTNode<DirectedEdge, Vertex>, Integer> depthMap = new HashMap<>();
         int actualDepth = 0;
-        IVertex root = rpst.getRoot();
+        IRPSTNode<DirectedEdge, Vertex> root = rpst.getRoot();
         depthMap.put(root, actualDepth);
         this.populateDepthMap(root, depthMap);
         return depthMap;
@@ -278,32 +270,29 @@ public class JoinMiner {
                 String joinGateName = "join_" + bpmnVertex.getName();
                 BpmnVertex joinGate = new BpmnVertex(joinGateName, true, BpmnNodeType.ORJOIN);
                 this.graph.addEdge(joinGate, bpmnVertex);
-                incomingEdges.forEach((bpmnEdge) -> {
-                    bpmnEdge.setTarget(joinGate);
-                });
+                incomingEdges.forEach((bpmnEdge) -> bpmnEdge.setTarget(joinGate));
                 joinGate.setName("ORJOIN_" + joinGateName);
             }
         }
 
     }
 
-    private void populateDepthMap(IVertex root, Map<IVertex, Integer> depthMap) {
-        Set<IVertex> rpstNodes = this.rpst.getRPSTNodes();
-        Map<IVertex, Boolean> visited = new HashMap();
-        rpstNodes.forEach((node) -> {
-            visited.put(node, false);
-        });
-        Queue<IVertex> bfsQueue = new LinkedList();
+    private void populateDepthMap(
+            IRPSTNode<DirectedEdge, Vertex> root, Map<IRPSTNode<DirectedEdge, Vertex>, Integer> depthMap) {
+        Set<IRPSTNode<DirectedEdge, Vertex>> rpstNodes = this.rpst.getRPSTNodes();
+        Map<IRPSTNode<DirectedEdge, Vertex>, Boolean> visited = new HashMap<>();
+        rpstNodes.forEach((node) -> visited.put(node, false));
+        Queue<IRPSTNode<DirectedEdge, Vertex>> bfsQueue = new LinkedList<>();
         bfsQueue.add(root);
         visited.put(root, true);
         depthMap.put(root, 0);
 
         while (!bfsQueue.isEmpty()) {
-            IVertex vertex = bfsQueue.peek();
+            IRPSTNode<DirectedEdge, Vertex> vertex = bfsQueue.peek();
             bfsQueue.poll();
-            Collection<IVertex> directSuccessors = this.rpst.getDirectSuccessors(vertex);
+            Collection<IRPSTNode<DirectedEdge, Vertex>> directSuccessors = this.rpst.getDirectSuccessors(vertex);
 
-            for (IVertex successor : directSuccessors) {
+            for (IRPSTNode<DirectedEdge, Vertex> successor : directSuccessors) {
                 if (!(Boolean) visited.get(successor)) {
                     depthMap.put(successor, depthMap.get(vertex) + 1);
                     bfsQueue.add(successor);
