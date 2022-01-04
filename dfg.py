@@ -11,10 +11,9 @@ from join_miner import JoinMiner
 
 class DFG:
 
-    def __init__(self, log):
+    def __init__(self, log, epsilon):
         self.log = log
         self.traces = self.prepare_traces()
-        # self.traces = prepare_artificial_traces()
         self.xor_count = 0
         self.or_count = 0
         self.and_count = 0
@@ -27,7 +26,7 @@ class DFG:
         self.self_loops, self.self_loops_starts = self.find_self_loops()
         self.short_loops = self.find_short_loops()
         self.remove_self_and_short_loops()
-        self.concurrent_tasks, self.infrequent_tasks = self.find_concurrent_and_infrequent_tasks(0.5)
+        self.concurrent_tasks, self.infrequent_tasks = self.find_concurrent_and_infrequent_tasks(epsilon)
         self.remove_concurrent_and_infrequent_tasks()
 
     def prepare_traces(self):
